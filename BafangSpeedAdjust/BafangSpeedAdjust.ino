@@ -6,10 +6,12 @@ MCP2515 mcp2515(10);
 
 struct can_frame canMsg35;
 const int buttonPin = 4;
-int buttonState = 0;   
+const int LedPin = 6;
+int buttonState = 1;   
 void setup() {
   Serial.begin(115200);
   pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(LedPin, OUTPUT);
   mcp2515.reset();
   mcp2515.setBitrate(CAN_250KBPS, MCP_8MHZ);
   mcp2515.setNormalMode();
@@ -18,8 +20,9 @@ void setup() {
   Serial.println();
 
   //Original read: 82F83203 6 C4 09 C0 2B CE 08 => C4 09 => 09C4 => 2500 => 25km/h
+  //Set:           85103203 6 B8 0B 2B CE 08 => AC 0D => 0DAC => 3000 => 30km/h
   //Set:           85103203 6 AC 0D C0 2B CE 08 => AC 0D => 0DAC => 3500 => 35km/h
-  //New read:      82F83203 6 AC 0D C0 2B CE 08
+  
   
   canMsg35.can_id  = 0x85103203 | CAN_EFF_FLAG;
   canMsg35.can_dlc = 6;
@@ -34,6 +37,7 @@ void setup() {
 void loop() {
   buttonState = digitalRead(buttonPin);
   if (buttonState == LOW) {
+    digitalWrite(LedPin, HIGH);
     putback();
   }
   }
