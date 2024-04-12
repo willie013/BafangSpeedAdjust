@@ -12,6 +12,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(buttonPin, INPUT_PULLUP);
   pinMode(LedPin, OUTPUT);
+  digitalWrite(LedPin, LOW);
   mcp2515.reset();
   mcp2515.setBitrate(CAN_250KBPS, MCP_8MHZ);
   mcp2515.setNormalMode();
@@ -37,8 +38,8 @@ void setup() {
 void loop() {
   buttonState = digitalRead(buttonPin);
   if (buttonState == LOW) {
-    digitalWrite(LedPin, HIGH);
     putback();
+    digitalWrite(LedPin, HIGH);
   }
   }
 
