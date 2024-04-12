@@ -21,7 +21,7 @@ void setup() {
   Serial.println();
 
   //Original read: 82F83203 6 C4 09 C0 2B CE 08 => C4 09 => 09C4 => 2500 => 25km/h
-  //Set:           85103203 6 B8 0B 2B CE 08 => AC 0D => 0DAC => 3000 => 30km/h
+  //Set:           85103203 6 B8 0B 2B CE 08 => B8 0B => 0BB8 => 3000 => 30km/h
   //Set:           85103203 6 AC 0D C0 2B CE 08 => AC 0D => 0DAC => 3500 => 35km/h
   
   
