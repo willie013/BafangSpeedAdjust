@@ -10,7 +10,7 @@ const int LedPin = 6;
 int buttonState = 1;   
 void setup() {
   Serial.begin(115200);
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(buttonPin, INPUT_PULLUP); //pulls pin high, prevents canbus programming
   pinMode(LedPin, OUTPUT);
   digitalWrite(LedPin, LOW);
   mcp2515.reset();
