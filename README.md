@@ -1,3 +1,5 @@
+This repo contains 2 scripts to adjust the motor speed of a Bafang M200 motor (`BafangSpeedAdjust`) and to reset the speed back to the legal speed of 25 km/h on the go (`BafangSpeedReset`)
+
 # BafangSpeedAdjust
 
 Simple speed adjustment for my bafang motor using CAN BUS on my Veloretti ace
