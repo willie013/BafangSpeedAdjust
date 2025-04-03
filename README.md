@@ -41,3 +41,12 @@ When you get home, use another unit to get your bike back to higher assist speed
 NB: When you power down the bike, on next restart the led will light up, in spite of having the bike at 25 kmph. Working on that issue! (or I just leave it as is)
 
 !!! USE AT OWN RISK !!!
+
+
+## Pinout 6 PIN brake cable
+
+![Pinout 6 PIN brake cable](pinout_m200_cable.png)
+
+## Speed table
+
+![Speed table](speedchart.jpg)
