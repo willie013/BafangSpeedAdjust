@@ -2,6 +2,19 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
+#include <CAN.h>
+
+bool speedSet = false;
+const long canBaudRate = 250E3;
+const long esp32BaudRate = 115200;
+const long canId = 0x85103203; // CAN ID
+const int speedLimit = 35; // Speed limit in km/h
+int wheelSize = 0; // Wheel size in mm (calculated to match 0xC0 and 0x2B)
+int wheelPerimeter = 0; // Wheel perimeter in mm (calculated to match 0xCE and 0x08)
+const bool logOnlyMode = true; // Set to true for log-only mode
+const int CAN_TX_PIN = 5; // Set your CAN TX pin
+const int CAN_RX_PIN = 4; // Set your CAN RX pin
+
 const char* ssid     = "ESP32-Velo";
 const char* password = "123456789";
 
@@ -22,6 +35,8 @@ void handle_led2off();
 void handle_NotFound();
 void handle_setSpeed();
 void handle_readSpeed();
+void printRepeatedMessage(const char* message, int count);
+void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter);
 String SendHTML(uint8_t led1stat, uint8_t led2stat);
 
 uint8_t LED1pin = 22; // Correct led
@@ -31,8 +46,7 @@ uint8_t LED2pin = 5;
 bool LED2status = LOW;
 
 void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(115200);
+  Serial.begin(esp32BaudRate);
   pinMode(LED1pin, OUTPUT);
   pinMode(LED2pin, OUTPUT);
 
@@ -56,6 +70,21 @@ void setup() {
   
   server.begin();
   Serial.println("HTTP server started");
+
+  // Set CAN pins
+  CAN.setPins(CAN_TX_PIN, CAN_RX_PIN);
+
+  if (!CAN.begin(canBaudRate)) {
+    Serial.println("Starting CAN failed!");
+    while (1);
+  }
+
+  Serial.println("CAN setup ok");
+  Serial.println();
+
+  // if (!logOnlyMode) { //why?
+  //   writeToCan(speedLimit, wheelSize, wheelPerimeter);
+  // }
 }
 
 void loop() {
@@ -118,6 +147,28 @@ void handle_setSpeed() {
     server.send(200, "text/html", SendHTML(true,LED2status)); 
     
     // Add logic to process the speed value, e.g., send it to the motor controller
+    if (!logOnlyMode && !speedSet && wheelSize > 0 && wheelPerimeter > 0) {
+      speedSet = true;
+      printRepeatedMessage("------ WRITING SPEED ------", 6);
+    
+      // Convert the string to an integer
+      writeToCan(speed.toInt(), wheelSize, wheelPerimeter);
+    
+      printRepeatedMessage("----------- DONE ----------", 6);
+    } else {
+      if (speedSet) {
+      Serial.println("Speed already set.");
+      }
+      if (logOnlyMode) {
+      Serial.println("Log-only mode is enabled.");
+      }
+      if (wheelSize <= 0) {
+      Serial.println("Wheel size is not set.");
+      }
+      if (wheelPerimeter <= 0) {
+      Serial.println("Wheel perimeter is not set.");
+      }
+    }
   } else {
     Serial.println("No speed value received");
   }
@@ -126,6 +177,55 @@ void handle_setSpeed() {
 
 void handle_readSpeed() {
   // Logic to read the current speed from the device
+
+  int packetSize = CAN.parsePacket();
+  speedSet = false; // Reset speedSet flag for reading speed
+
+  if (packetSize) {
+    if (CAN.packetExtended()) {
+      Serial.print("Extended ID: 0x");
+      Serial.print(CAN.packetId(), HEX);
+    } else {
+      Serial.print("Standard ID: 0x");
+      Serial.print(CAN.packetId(), HEX);
+    }
+
+    Serial.print(" DLC: ");
+    Serial.print(packetSize);
+
+    while (CAN.available()) {
+      Serial.print(" ");
+      Serial.print(CAN.read(), HEX);
+    }
+    Serial.println();
+
+    // Print human-readable data if packetid ends with 0x3203
+    if (packetSize >= 6 && (CAN.packetId() & 0xFFFF) == 0x3203) {
+      CAN.beginPacket(canId);
+      int speedHigh = CAN.read();
+      int speedLow = CAN.read();
+      int speed = (speedHigh << 8) | speedLow;
+      Serial.print("Speed Limit: ");
+      Serial.print(speed / 100.0);
+      Serial.println(" km/h");
+
+      int wheelSizeLow = CAN.read();
+      int wheelSizeHigh = CAN.read();
+      int wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
+      Serial.print("Wheel Size: ");
+      Serial.print(wheelSize * 10);
+      Serial.println(" mm");
+
+      int wheelPerimeterLow = CAN.read();
+      int wheelPerimeterHigh = CAN.read();
+      int wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
+      Serial.print("Wheel Perimeter: ");
+      Serial.print(wheelPerimeter);
+      Serial.println(" mm");
+    }
+  }
+
+  /////////
   String currentSpeed = "Unknown"; // Replace with actual speed reading logic
   Serial.print("Current Speed: ");
   Serial.println(currentSpeed);
@@ -134,7 +234,29 @@ void handle_readSpeed() {
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
 }
 
-String SendHTML(uint8_t led1stat,uint8_t led2stat){
+void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter) {
+  int speed = speedLimit * 100; // Convert km/h to the required format
+  uint32_t temp_wheel_size = (wheelSize / 10) & 0x0F;
+  temp_wheel_size = temp_wheel_size << 4;
+  temp_wheel_size += (wheelSize % 10);
+
+  CAN.beginExtendedPacket(canId);
+  CAN.write((speed >> 8) & 0xFF); // Speed limit high byte
+  CAN.write(speed & 0xFF);        // Speed limit low byte
+  CAN.write(temp_wheel_size);     // Wheel size low byte
+  CAN.write((wheelSize >> 8) & 0xFF); // Wheel size high byte
+  CAN.write(wheelPerimeter & 0xFF);   // Wheel perimeter low byte
+  CAN.write((wheelPerimeter >> 8) & 0xFF); // Wheel perimeter high byte
+  CAN.endPacket();
+}
+
+void printRepeatedMessage(const char* message, int count) {
+  for (int i = 0; i < count; i++) {
+    Serial.println(message);
+  }
+}
+
+String SendHTML(uint8_t led1stat, uint8_t led2stat) {
   String ptr = "<!DOCTYPE html> <html>\n";
   ptr +="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
   ptr +="<title>Speed Control</title>\n";
