@@ -50,3 +50,7 @@ NB: When you power down the bike, on next restart the led will light up, in spit
 ## Speed table
 
 ![Speed table](speedchart.jpg)
+
+## Wiring
+
+![Wiring](wiring.png)
