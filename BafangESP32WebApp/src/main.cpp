@@ -11,7 +11,7 @@ const long canId = 0x85103203; // CAN ID
 const int speedLimit = 35; // Speed limit in km/h
 int wheelSize = 0; // Wheel size in mm (calculated to match 0xC0 and 0x2B)
 int wheelPerimeter = 0; // Wheel perimeter in mm (calculated to match 0xCE and 0x08)
-const bool logOnlyMode = true; // Set to true for log-only mode
+bool logOnlyMode = true; // Set to true for log-only mode
 const int CAN_TX_PIN = 5; // Set your CAN TX pin
 const int CAN_RX_PIN = 4; // Set your CAN RX pin
 String logBuffer = ""; // Buffer for logging messages
@@ -36,6 +36,7 @@ void handle_led2off();
 void handle_NotFound();
 void handle_setSpeed();
 void handle_readSpeed();
+void handle_toggleLogMode();
 void appendToLog(const String& message);
 void printRepeatedMessage(const char* message, int count);
 void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter);
@@ -71,6 +72,7 @@ void setup() {
   server.on("/led2off", handle_led2off);
   server.on("/setSpeed", handle_setSpeed); // New route for speed setting
   server.on("/readSpeed", handle_readSpeed); // New route for reading speed
+  server.on("/toggleLogMode", handle_toggleLogMode); // New route for toggling log mode
   server.on("/log", []() {
     server.send(200, "text/plain", logBuffer); // Send the log buffer as plain text
   });
@@ -261,6 +263,14 @@ void handle_readSpeed() {
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
 }
 
+void handle_toggleLogMode() {
+  logOnlyMode = !logOnlyMode; // Toggle the logOnlyMode
+  String status = logOnlyMode ? "enabled" : "disabled";
+  Serial.println("Log-only mode " + status);
+  appendToLog("Log-only mode " + status);
+  server.send(200, "text/html", SendHTML(LED1status, LED2status));
+}
+
 void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter) {
   int speed = speedLimit * 100; // Convert km/h to the required format
   uint32_t temp_wheel_size = (wheelSize / 10) & 0x0F;
@@ -311,7 +321,7 @@ String SendHTML(uint8_t led1stat, uint8_t led2stat) {
   ptr +="<h1>Veloretti Speed Settings</h1>\n";
 
   // Add current speed display and read button
-  ptr +="<p>Current Speed: <span id=\"currentSpeed\">Unknown</span></p>\n";
+  ptr +="<p>Current Speed: <span id=\"speed\">Unknown</span></p>\n";
   ptr +="<form action=\"/readSpeed\" method=\"GET\">\n";
   ptr +="<input type=\"submit\" value=\"Read from bike\" class=\"button\">\n";
   ptr +="</form>\n";
@@ -320,15 +330,22 @@ String SendHTML(uint8_t led1stat, uint8_t led2stat) {
   ptr +="<form action=\"/setSpeed\" method=\"GET\">\n";
   ptr +="<label for=\"speed\">Select Speed:</label>\n";
   ptr +="<select id=\"speed\" name=\"speed\">\n";
-  ptr +="  <option value=\"25\">25 km/h</option>\n";
-  ptr +="  <option value=\"27\">28 km/h</option>\n";
-  ptr +="  <option value=\"30\">30 km/h</option>\n";
-  ptr +="  <option value=\"32\">32 km/h</option>\n";
-  ptr +="  <option value=\"35\">35 km/h</option>\n";
-  ptr +="  <option value=\"37\">37 km/h</option>\n";
+  for (int i = 25; i <= 37; i++) {
+    ptr += "  <option value=\"" + String(i) + "\">" + String(i) + " km/h</option>\n";
+  }
   ptr +="</select>\n";
   ptr +="<br><br>\n";
   ptr +="<input type=\"submit\" value=\"Write to bike\" class=\"button\">\n";
+  ptr +="</form>\n";
+
+  // Add toggle for log-only mode as a checkbox
+  ptr +="<form action=\"/toggleLogMode\" method=\"GET\">\n";
+  ptr +="<label for=\"logMode\">Log-Only Mode:</label>\n";
+  ptr +="<input type=\"checkbox\" id=\"logMode\" name=\"logMode\" onchange=\"this.form.submit()\"";
+  if (logOnlyMode) {
+    ptr +=" checked";
+  }
+  ptr +=">\n";
   ptr +="</form>\n";
 
   // Add log display
