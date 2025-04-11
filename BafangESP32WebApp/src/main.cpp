@@ -14,6 +14,7 @@ int wheelPerimeter = 0; // Wheel perimeter in mm (calculated to match 0xCE and 0
 const bool logOnlyMode = true; // Set to true for log-only mode
 const int CAN_TX_PIN = 5; // Set your CAN TX pin
 const int CAN_RX_PIN = 4; // Set your CAN RX pin
+String logBuffer = ""; // Buffer for logging messages
 
 const char* ssid     = "ESP32-Velo";
 const char* password = "123456789";
@@ -35,6 +36,7 @@ void handle_led2off();
 void handle_NotFound();
 void handle_setSpeed();
 void handle_readSpeed();
+void appendToLog(const String& message);
 void printRepeatedMessage(const char* message, int count);
 void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter);
 String SendHTML(uint8_t led1stat, uint8_t led2stat);
@@ -54,8 +56,11 @@ void setup() {
   WiFi.softAPConfig(local_ip, gateway, subnet, dns); // Added DNS server configuration
   
   Serial.println("AP started");
+  appendToLog("AP started");
   Serial.print("AP IP address: ");
+  appendToLog("AP IP address: "); 
   Serial.println(WiFi.softAPIP());
+  appendToLog(WiFi.softAPIP().toString());
 
   delay(100);
 
@@ -66,21 +71,26 @@ void setup() {
   server.on("/led2off", handle_led2off);
   server.on("/setSpeed", handle_setSpeed); // New route for speed setting
   server.on("/readSpeed", handle_readSpeed); // New route for reading speed
+  server.on("/log", []() {
+    server.send(200, "text/plain", logBuffer); // Send the log buffer as plain text
+  });
   server.onNotFound(handle_NotFound);
   
   server.begin();
   Serial.println("HTTP server started");
+  appendToLog("HTTP server started");
 
   // Set CAN pins
   CAN.setPins(CAN_TX_PIN, CAN_RX_PIN);
 
   if (!CAN.begin(canBaudRate)) {
     Serial.println("Starting CAN failed!");
+    appendToLog("Starting CAN failed!");
     while (1);
   }
 
   Serial.println("CAN setup ok");
-  Serial.println();
+  appendToLog("CAN setup ok");
 
   // if (!logOnlyMode) { //why?
   //   writeToCan(speedLimit, wheelSize, wheelPerimeter);
@@ -98,6 +108,13 @@ void loop() {
   {digitalWrite(LED2pin, HIGH);}
   else
   {digitalWrite(LED2pin, LOW);}
+}
+
+void appendToLog(const String& message) {
+  logBuffer += message + "\n"; // Add the message to the buffer
+  if (logBuffer.length() > 1000) { // Limit buffer size to 1000 characters
+    logBuffer = logBuffer.substring(logBuffer.length() - 1000);
+  }
 }
 
 void handle_OnConnect() {
@@ -139,7 +156,9 @@ void handle_setSpeed() {
   if (server.hasArg("speed")) {
     String speed = server.arg("speed");
     Serial.print("Speed selected: ");
+    appendToLog("Speed selected: ");
     Serial.println(speed);
+    appendToLog(speed);
 
     // Confirm writing to device with LED1
     LED1status = LOW;
@@ -158,19 +177,24 @@ void handle_setSpeed() {
     } else {
       if (speedSet) {
       Serial.println("Speed already set.");
+      appendToLog("Speed already set.");
       }
       if (logOnlyMode) {
       Serial.println("Log-only mode is enabled.");
+      appendToLog("Log-only mode is enabled.");
       }
       if (wheelSize <= 0) {
       Serial.println("Wheel size is not set.");
+      appendToLog("Wheel size is not set.");
       }
       if (wheelPerimeter <= 0) {
       Serial.println("Wheel perimeter is not set.");
+      appendToLog("Wheel perimeter is not set.");
       }
     }
   } else {
     Serial.println("No speed value received");
+    appendToLog("No speed value received");
   }
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
 }
@@ -178,6 +202,7 @@ void handle_setSpeed() {
 void handle_readSpeed() {
   // Logic to read the current speed from the device
 
+  appendToLog("Reading speed from CAN bus...");
   int packetSize = CAN.parsePacket();
   speedSet = false; // Reset speedSet flag for reading speed
 
@@ -185,17 +210,21 @@ void handle_readSpeed() {
     if (CAN.packetExtended()) {
       Serial.print("Extended ID: 0x");
       Serial.print(CAN.packetId(), HEX);
+      appendToLog("Extended ID: 0x" + String(CAN.packetId(), HEX));
     } else {
       Serial.print("Standard ID: 0x");
       Serial.print(CAN.packetId(), HEX);
+      appendToLog("Standard ID: 0x" + String(CAN.packetId(), HEX));
     }
 
     Serial.print(" DLC: ");
     Serial.print(packetSize);
+    appendToLog("DLC: " + String(packetSize));
 
     while (CAN.available()) {
       Serial.print(" ");
       Serial.print(CAN.read(), HEX);
+      appendToLog(" " + String(CAN.read(), HEX));
     }
     Serial.println();
 
@@ -208,6 +237,7 @@ void handle_readSpeed() {
       Serial.print("Speed Limit: ");
       Serial.print(speed / 100.0);
       Serial.println(" km/h");
+      appendToLog("Speed Limit: " + String(speed / 100.0) + " km/h");
 
       int wheelSizeLow = CAN.read();
       int wheelSizeHigh = CAN.read();
@@ -215,6 +245,7 @@ void handle_readSpeed() {
       Serial.print("Wheel Size: ");
       Serial.print(wheelSize * 10);
       Serial.println(" mm");
+      appendToLog("Wheel Size: " + String(wheelSize * 10) + " mm");
 
       int wheelPerimeterLow = CAN.read();
       int wheelPerimeterHigh = CAN.read();
@@ -222,14 +253,10 @@ void handle_readSpeed() {
       Serial.print("Wheel Perimeter: ");
       Serial.print(wheelPerimeter);
       Serial.println(" mm");
+      appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
     }
   }
 
-  /////////
-  String currentSpeed = "Unknown"; // Replace with actual speed reading logic
-  Serial.print("Current Speed: ");
-  Serial.println(currentSpeed);
-  
   // Send the current speed back to the client
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
 }
@@ -253,6 +280,7 @@ void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter) {
 void printRepeatedMessage(const char* message, int count) {
   for (int i = 0; i < count; i++) {
     Serial.println(message);
+    appendToLog(message);
   }
 }
 
@@ -268,7 +296,16 @@ String SendHTML(uint8_t led1stat, uint8_t led2stat) {
   ptr +=".button-off {background-color: #34495e;}\n";
   ptr +=".button-off:active {background-color: #2c3e50;}\n";
   ptr +="p {font-size: 14px;color: #888;margin-bottom: 10px;}\n";
+  ptr +="#log {text-align: left; margin: 20px auto; width: 90%; height: 200px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9;}\n";
   ptr +="</style>\n";
+  ptr +="<script>\n";
+  ptr +="function fetchLog() {\n";
+  ptr +="  fetch('/log').then(response => response.text()).then(data => {\n";
+  ptr +="    document.getElementById('log').innerText = data;\n";
+  ptr +="  });\n";
+  ptr +="}\n";
+  ptr +="setInterval(fetchLog, 1000);\n"; // Refresh log every second
+  ptr +="</script>\n";
   ptr +="</head>\n";
   ptr +="<body>\n";
   ptr +="<h1>Veloretti Speed Settings</h1>\n";
@@ -293,6 +330,10 @@ String SendHTML(uint8_t led1stat, uint8_t led2stat) {
   ptr +="<br><br>\n";
   ptr +="<input type=\"submit\" value=\"Write to bike\" class=\"button\">\n";
   ptr +="</form>\n";
+
+  // Add log display
+  ptr +="<h3>Log Output</h3>\n";
+  ptr +="<div id=\"log\">Loading...</div>\n";
 
   ptr +="</body>\n";
   ptr +="</html>\n";
