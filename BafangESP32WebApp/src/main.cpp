@@ -4,26 +4,26 @@
 
 #include <CAN.h>
 
-bool speedSet = false;
+bool testmode = true; // Set to true for testing mode
+bool speedSet = true;
 const long canBaudRate = 250E3;
 const long esp32BaudRate = 115200;
 const long canId = 0x85103203; // CAN ID
-const int speedLimit = 35; // Speed limit in km/h
-int wheelSize = 0; // Wheel size in mm (calculated to match 0xC0 and 0x2B)
-int wheelPerimeter = 0; // Wheel perimeter in mm (calculated to match 0xCE and 0x08)
+int speed = 0;
+int wheelSize = 0; // 11040; // Wheel size in mm (calculated to match 0xC0 and 0x2B)
+int wheelPerimeter = 0; // 2254; // Wheel perimeter in mm (calculated to match 0xCE and 0x08)
 bool logOnlyMode = true; // Set to true for log-only mode
 const int CAN_TX_PIN = 5; // Set your CAN TX pin
 const int CAN_RX_PIN = 4; // Set your CAN RX pin
 String logBuffer = ""; // Buffer for logging messages
 
-const char* ssid     = "ESP32-Velo";
+const char* ssid     = "Veloretti-ESP";
 const char* password = "123456789";
 
 /* Put IP Address details */
 IPAddress local_ip(192,168,1,1);
 IPAddress gateway(192,168,1,1);
 IPAddress subnet(255,255,255,0);
-IPAddress dns(8,8,8,8); // Google Public DNS
 
 WebServer server(80);
 
@@ -54,7 +54,7 @@ void setup() {
   pinMode(LED2pin, OUTPUT);
 
   WiFi.softAP(ssid, password);
-  WiFi.softAPConfig(local_ip, gateway, subnet, dns); // Added DNS server configuration
+  WiFi.softAPConfig(local_ip, gateway, subnet); 
   
   Serial.println("AP started");
   appendToLog("AP started");
@@ -91,12 +91,19 @@ void setup() {
     while (1);
   }
 
-  Serial.println("CAN setup ok");
-  appendToLog("CAN setup ok");
+  // Test CAN bus by checking availability
+  delay(100); // Allow time for the CAN bus to initialize
 
-  // if (!logOnlyMode) { //why?
-  //   writeToCan(speedLimit, wheelSize, wheelPerimeter);
-  // }
+  if (CAN.available()) {
+    Serial.println("CAN setup ok");
+    appendToLog("CAN setup ok");
+  } else {
+    Serial.println("CAN setup failed: No response from CAN bus");
+    appendToLog("CAN setup failed: No response from CAN bus");
+    if(!testmode){
+      while (1);
+    }
+  }
 }
 
 void loop() {
@@ -158,10 +165,9 @@ void handle_setSpeed() {
   if (server.hasArg("speed")) {
     String speed = server.arg("speed");
     Serial.print("Speed selected: ");
-    appendToLog("Speed selected: ");
     Serial.println(speed);
-    appendToLog(speed);
-
+    appendToLog("Speed selected: " + speed);
+    
     // Confirm writing to device with LED1
     LED1status = LOW;
     Serial.println("GPIO4 Status: ON");
@@ -169,29 +175,21 @@ void handle_setSpeed() {
     
     // Add logic to process the speed value, e.g., send it to the motor controller
     if (!logOnlyMode && !speedSet && wheelSize > 0 && wheelPerimeter > 0) {
-      speedSet = true;
       printRepeatedMessage("------ WRITING SPEED ------", 6);
     
       // Convert the string to an integer
       writeToCan(speed.toInt(), wheelSize, wheelPerimeter);
-    
+      speedSet = true;
+
       printRepeatedMessage("----------- DONE ----------", 6);
     } else {
-      if (speedSet) {
-      Serial.println("Speed already set.");
-      appendToLog("Speed already set.");
+      if (speedSet || wheelSize <= 0 || wheelPerimeter <= 0) {
+      Serial.println("First read settings from the bike");
+      appendToLog("First read settings from the bike.");
       }
       if (logOnlyMode) {
-      Serial.println("Log-only mode is enabled.");
-      appendToLog("Log-only mode is enabled.");
-      }
-      if (wheelSize <= 0) {
-      Serial.println("Wheel size is not set.");
-      appendToLog("Wheel size is not set.");
-      }
-      if (wheelPerimeter <= 0) {
-      Serial.println("Wheel perimeter is not set.");
-      appendToLog("Wheel perimeter is not set.");
+      Serial.println("Log-only mode is enabled, cannot write to bike.");
+      appendToLog("Log-only mode is enabled, cannot write to bike.");
       }
     }
   } else {
@@ -235,15 +233,15 @@ void handle_readSpeed() {
       CAN.beginPacket(canId);
       int speedHigh = CAN.read();
       int speedLow = CAN.read();
-      int speed = (speedHigh << 8) | speedLow;
+      speed = (speedHigh << 8) | speedLow;
       Serial.print("Speed Limit: ");
       Serial.print(speed / 100.0);
       Serial.println(" km/h");
-      appendToLog("Speed Limit: " + String(speed / 100.0) + " km/h");
+      appendToLog("Speed Limit on bike: " + String(speed / 100.0) + " km/h");
 
       int wheelSizeLow = CAN.read();
       int wheelSizeHigh = CAN.read();
-      int wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
+      wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
       Serial.print("Wheel Size: ");
       Serial.print(wheelSize * 10);
       Serial.println(" mm");
@@ -251,14 +249,19 @@ void handle_readSpeed() {
 
       int wheelPerimeterLow = CAN.read();
       int wheelPerimeterHigh = CAN.read();
-      int wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
+      wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
       Serial.print("Wheel Perimeter: ");
       Serial.print(wheelPerimeter);
       Serial.println(" mm");
       appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
     }
   }
-
+  
+  if(testmode){
+    speed = random(2500, 3700); // Simulate speed for testing
+    wheelSize = random(0, 100); // Simulate wheel size for testing
+    wheelPerimeter = random(0, 100); // Simulate wheel perimeter for testing
+  }
   // Send the current speed back to the client
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
 }
@@ -320,8 +323,10 @@ String SendHTML(uint8_t led1stat, uint8_t led2stat) {
   ptr +="<body>\n";
   ptr +="<h1>Veloretti Speed Settings</h1>\n";
 
-  // Add current speed display and read button
-  ptr +="<p>Current Speed: <span id=\"speed\">Unknown</span></p>\n";
+  // Add current speed, wheel size, and wheel perimeter display and read button
+  ptr +="<p>Current Speed: <span id=\"speed\">" + String(speed / 100.0) + " km/h</span></p>\n";
+  ptr +="<p>Wheel Size: <span id=\"wheelSize\">" + String(wheelSize * 10) + " mm</span></p>\n";
+  ptr +="<p>Wheel Perimeter: <span id=\"wheelPerimeter\">" + String(wheelPerimeter) + " mm</span></p>\n";
   ptr +="<form action=\"/readSpeed\" method=\"GET\">\n";
   ptr +="<input type=\"submit\" value=\"Read from bike\" class=\"button\">\n";
   ptr +="</form>\n";
