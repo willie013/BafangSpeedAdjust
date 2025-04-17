@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
-
-#include <CAN.h>
+#include <SPI.h>
+#include <mcp_can.h>
 
 bool testmode = true; // Set to true for testing mode
 bool speedSet = true;
@@ -13,9 +13,11 @@ int speed = 0;
 int wheelSize = 0; // 11040; // Wheel size in mm (calculated to match 0xC0 and 0x2B)
 int wheelPerimeter = 0; // 2254; // Wheel perimeter in mm (calculated to match 0xCE and 0x08)
 bool logOnlyMode = true; // Set to true for log-only mode
-const int CAN_TX_PIN = 5; // Set your CAN TX pin
-const int CAN_RX_PIN = 4; // Set your CAN RX pin
+const int SPI_CS_PIN = 5;  // CS pin for MCP2515
 String logBuffer = ""; // Buffer for logging messages
+
+// Create MCP_CAN instance
+MCP_CAN CAN0(SPI_CS_PIN);
 
 const char* ssid     = "Veloretti-ESP";
 const char* password = "123456789";
@@ -87,28 +89,20 @@ void setup() {
   appendToLog("MISO pin:" + String(MISO));
   appendToLog("SCK pin:" + String(SCK));
 
-  // Set CAN pins
-  CAN.setPins(CAN_TX_PIN, CAN_RX_PIN);
-
-  if (!CAN.begin(canBaudRate)) {
-    Serial.println("Starting CAN failed!");
-    appendToLog("Starting CAN failed!");
-    while (1);
-  }
-
-  // Test CAN bus by checking availability
-  delay(100); // Allow time for the CAN bus to initialize
-
-  if (CAN.available()) {
-    Serial.println("CAN setup ok");
-    appendToLog("CAN setup ok");
+  // Initialize MCP2515 running at 8MHz with a baudrate of 250kb/s
+  if(CAN0.begin(MCP_ANY, CAN_250KBPS, MCP_8MHZ) == CAN_OK) {
+    Serial.println("MCP2515 Initialized Successfully!");
+    appendToLog("MCP2515 Initialized Successfully!");
   } else {
-    Serial.println("CAN setup failed: No response from CAN bus");
-    appendToLog("CAN setup failed: No response from CAN bus");
-    if(!testmode){
-      while (1);
+    Serial.println("Error Initializing MCP2515...");
+    appendToLog("Error Initializing MCP2515...");
+    if(!testmode) {
+      while(1);
     }
   }
+
+  // Set operation mode to normal
+  CAN0.setMode(MCP_NORMAL);
 }
 
 void loop() {
@@ -208,54 +202,50 @@ void handle_readSpeed() {
   appendToLog("Reading speed from CAN bus...");
   speedSet = false; // Reset speedSet flag for reading speed
 
-  int packetSize = CAN.parsePacket();
-  if (!packetSize) {
-    appendToLog("No CAN packet received");
-    if (testmode) {
-      speed = random(2500, 3700); // 25-37 km/h
-      wheelSize = random(20, 25); // 20-25 inch wheels
-      wheelPerimeter = random(1800, 2200); // Typical wheel perimeters
-      appendToLog("Test mode: Using simulated values");
+  byte len = 0;
+  byte buf[8];
+  long unsigned int rxId;
+
+  if(CAN0.readMsgBuf(&rxId, &len, buf) == CAN_OK) {
+    if(len >= 6 && (rxId & 0xFFFF) == 0x3203) {
+      // Log full CAN message in the exact format
+      String messageInfo = String(rxId, HEX);
+      messageInfo += " " + String(len);
+      
+      for(int i = 0; i < len; i++) {
+        messageInfo += " " + String(buf[i], HEX);
+      }
+      appendToLog(messageInfo);
+
+      // Extract speed (bytes 0-1)
+      int speedHigh = buf[0];
+      int speedLow = buf[1];
+      speed = (speedHigh << 8) | speedLow;
+      appendToLog("Speed Limit on bike: " + String(speed / 100.0) + " km/h");
+
+      // Extract wheel size (bytes 2-3)
+      int wheelSizeLow = buf[2];
+      int wheelSizeHigh = buf[3];
+      wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
+      appendToLog("Wheel Size: " + String(wheelSize * 10) + " mm");
+      appendToLog("Wheel Size (Hex): 0x" + String(wheelSize, HEX));
+
+      // Extract wheel perimeter (bytes 4-5)
+      int wheelPerimeterLow = buf[4];
+      int wheelPerimeterHigh = buf[5];
+      wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
+      appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
+      appendToLog("Wheel Perimeter (Hex): 0x" + String(wheelPerimeter, HEX));
+    } else {
+      appendToLog("Received non-speed packet or invalid packet size");
     }
-    server.send(200, "text/html", SendHTML(LED1status, LED2status));
-    return;
-  }
-
-  // Log full CAN message in the exact format
-  String messageInfo = String(CAN.packetId(), HEX);
-  messageInfo += " " + String(packetSize);
-  
-  // Store CAN data in buffer (6 bytes: 2 for speed, 2 for wheel size, 2 for perimeter)
-  uint8_t data[6];
-  for (int i = 0; i < 6 && CAN.available(); i++) {
-    data[i] = CAN.read();
-    messageInfo += " " + String(data[i], HEX);
-  }
-  appendToLog(messageInfo);
-
-  // Process speed-related packet (ID ends with 0x3203)
-  if (packetSize >= 6 && (CAN.packetId() & 0xFFFF) == 0x3203) {
-    // Extract speed (bytes 0-1)
-    int speedHigh = data[0];  // C4
-    int speedLow = data[1];   // 09
-    speed = (speedHigh << 8) | speedLow;
-    appendToLog("Speed Limit on bike: " + String(speed / 100.0) + " km/h");
-
-    // Extract wheel size (bytes 2-3)
-    int wheelSizeLow = data[2];   // C0
-    int wheelSizeHigh = data[3];  // 2B
-    wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
-    appendToLog("Wheel Size: " + String(wheelSize * 10) + " mm");
-    appendToLog("Wheel Size (Hex): 0x" + String(wheelSize, HEX));
-
-    // Extract wheel perimeter (bytes 4-5)
-    int wheelPerimeterLow = data[4];   // CE
-    int wheelPerimeterHigh = data[5];  // 08
-    wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
-    appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
-    appendToLog("Wheel Perimeter (Hex): 0x" + String(wheelPerimeter, HEX));
+  } else if (testmode) {
+    speed = random(2500, 3700); // 25-37 km/h
+    wheelSize = random(20, 25); // 20-25 inch wheels
+    wheelPerimeter = random(1800, 2200); // Typical wheel perimeters
+    appendToLog("Test mode: Using simulated values");
   } else {
-    appendToLog("Received non-speed packet or invalid packet size");
+    appendToLog("No CAN packet received");
   }
 
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
@@ -275,28 +265,34 @@ void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter) {
   temp_wheel_size = temp_wheel_size << 4;
   temp_wheel_size += (wheelSize % 10);
 
-  CAN.beginExtendedPacket(canId);
-  CAN.write((speed >> 8) & 0xFF); // Speed limit high byte
-  CAN.write(speed & 0xFF);        // Speed limit low byte
-  CAN.write(temp_wheel_size);     // Wheel size low byte
-  CAN.write((wheelSize >> 8) & 0xFF); // Wheel size high byte
-  CAN.write(wheelPerimeter & 0xFF);   // Wheel perimeter low byte
-  CAN.write((wheelPerimeter >> 8) & 0xFF); // Wheel perimeter high byte
-  CAN.endPacket();
+  byte data[6];
+  data[0] = (speed >> 8) & 0xFF;     // Speed limit high byte
+  data[1] = speed & 0xFF;            // Speed limit low byte
+  data[2] = temp_wheel_size;         // Wheel size low byte
+  data[3] = (wheelSize >> 8) & 0xFF; // Wheel size high byte
+  data[4] = wheelPerimeter & 0xFF;   // Wheel perimeter low byte
+  data[5] = (wheelPerimeter >> 8) & 0xFF; // Wheel perimeter high byte
 
-  // Log the complete CAN message in standard format: ID DLC DATA_BYTES
-  String canMessage = String(canId, HEX) + " " + 
-                     String(6) + " " + // DLC (Data Length Code) is 6 bytes
-                     String((speed >> 8) & 0xFF, HEX) + " " + 
-                     String(speed & 0xFF, HEX) + " " +
-                     String(temp_wheel_size, HEX) + " " + 
-                     String((wheelSize >> 8) & 0xFF, HEX) + " " +
-                     String(wheelPerimeter & 0xFF, HEX) + " " + 
-                     String((wheelPerimeter >> 8) & 0xFF, HEX);
+  // Send the CAN message
+  byte sndStat = CAN0.sendMsgBuf(canId, 1, 6, data); // 1 indicates extended ID
   
-  // Ensure all hex values are uppercase and padded to 2 digits
-  canMessage.toUpperCase();
-  appendToLog("CAN Message sent: " + canMessage);
+  if(sndStat == CAN_OK) {
+    // Log the complete CAN message in standard format: ID DLC DATA_BYTES
+    String canMessage = String(canId, HEX) + " " + 
+                       String(6) + " " + // DLC (Data Length Code) is 6 bytes
+                       String(data[0], HEX) + " " + 
+                       String(data[1], HEX) + " " +
+                       String(data[2], HEX) + " " + 
+                       String(data[3], HEX) + " " +
+                       String(data[4], HEX) + " " + 
+                       String(data[5], HEX);
+    
+    // Ensure all hex values are uppercase and padded to 2 digits
+    canMessage.toUpperCase();
+    appendToLog("CAN Message sent: " + canMessage);
+  } else {
+    appendToLog("Error sending CAN message");
+  }
 }
 
 void printRepeatedMessage(const char* message, int count) {
