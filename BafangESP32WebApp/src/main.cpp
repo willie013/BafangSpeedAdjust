@@ -82,6 +82,11 @@ void setup() {
   Serial.println("HTTP server started");
   appendToLog("HTTP server started");
 
+  // Print MOSI, MISO, SCK of board
+  appendToLog("MOSI pin:" + String(MOSI));
+  appendToLog("MISO pin:" + String(MISO));
+  appendToLog("SCK pin:" + String(SCK));
+
   // Set CAN pins
   CAN.setPins(CAN_TX_PIN, CAN_RX_PIN);
 
