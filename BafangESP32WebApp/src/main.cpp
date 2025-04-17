@@ -4,7 +4,7 @@
 #include <SPI.h>
 #include <mcp_can.h>
 
-bool testmode = true; // Set to true for testing mode
+bool testmode = false; // Set to true for testing mode
 bool speedSet = true;
 const long canBaudRate = 250E3;
 const long esp32BaudRate = 115200;
@@ -205,47 +205,60 @@ void handle_readSpeed() {
   byte len = 0;
   byte buf[8];
   long unsigned int rxId;
+  bool foundSpeedMessage = false;
+  unsigned long startTime = millis();
+  const unsigned long timeout = 10000; // 5 second timeout
 
-  if(CAN0.readMsgBuf(&rxId, &len, buf) == CAN_OK) {
-    if(len >= 6 && (rxId & 0xFFFF) == 0x3203) {
-      // Log full CAN message in the exact format
-      String messageInfo = String(rxId, HEX);
-      messageInfo += " " + String(len);
+  // Try to find a 0x3203 message within the timeout period
+  while (!foundSpeedMessage && (millis() - startTime < timeout)) {
+    if(CAN0.readMsgBuf(&rxId, &len, buf) == CAN_OK) {
+      // Log all received messages for debugging
+      String messageInfo = "CAN ID: 0x" + String(rxId, HEX) + 
+                          ", Length: " + String(len) + 
+                          ", Data: ";
       
       for(int i = 0; i < len; i++) {
-        messageInfo += " " + String(buf[i], HEX);
+        messageInfo += "0x" + String(buf[i], HEX) + " ";
       }
       appendToLog(messageInfo);
 
-      // Extract speed (bytes 0-1)
-      int speedHigh = buf[0];
-      int speedLow = buf[1];
-      speed = (speedHigh << 8) | speedLow;
-      appendToLog("Speed Limit on bike: " + String(speed / 100.0) + " km/h");
-
-      // Extract wheel size (bytes 2-3)
-      int wheelSizeLow = buf[2];
-      int wheelSizeHigh = buf[3];
-      wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
-      appendToLog("Wheel Size: " + String(wheelSize * 10) + " mm");
-      appendToLog("Wheel Size (Hex): 0x" + String(wheelSize, HEX));
-
-      // Extract wheel perimeter (bytes 4-5)
-      int wheelPerimeterLow = buf[4];
-      int wheelPerimeterHigh = buf[5];
-      wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
-      appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
-      appendToLog("Wheel Perimeter (Hex): 0x" + String(wheelPerimeter, HEX));
+      // Check if the CAN ID ends with 0x3203
+      if((rxId & 0xFFFF) == 0x3203 && len >= 6) {
+        foundSpeedMessage = true;
+        
+        // Extract speed from bytes 0-1
+        int speedHigh = buf[0];
+        int speedLow = buf[1];
+        speed = (speedHigh << 8) | speedLow;
+        appendToLog("Speed: " + String(speed / 100.0) + " km/h");
+        
+        // Extract wheel size from bytes 2-3
+        int wheelSizeLow = buf[2];
+        int wheelSizeHigh = buf[3];
+        wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
+        appendToLog("Wheel Size: " + String(wheelSize * 10) + " mm");
+        
+        // Extract wheel perimeter from bytes 4-5
+        int wheelPerimeterLow = buf[4];
+        int wheelPerimeterHigh = buf[5];
+        wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
+        appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
+      }
     } else {
-      appendToLog("Received non-speed packet or invalid packet size");
+      // No message available, wait a bit before trying again
+      delay(5);
     }
-  } else if (testmode) {
-    speed = random(2500, 3700); // 25-37 km/h
-    wheelSize = random(20, 25); // 20-25 inch wheels
-    wheelPerimeter = random(1800, 2200); // Typical wheel perimeters
-    appendToLog("Test mode: Using simulated values");
-  } else {
-    appendToLog("No CAN packet received");
+  }
+
+  if (!foundSpeedMessage) {
+    if (testmode) {
+      speed = random(2500, 3700); // 25-37 km/h
+      wheelSize = random(20, 25); // 20-25 inch wheels
+      wheelPerimeter = random(1800, 2200); // Typical wheel perimeters
+      appendToLog("Test mode: Using simulated values");
+    } else {
+      appendToLog("No speed message (0x3203) received within timeout period");
+    }
   }
 
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
