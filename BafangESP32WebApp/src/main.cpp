@@ -200,69 +200,59 @@ void handle_setSpeed() {
 }
 
 void handle_readSpeed() {
-  // Logic to read the current speed from the device
-
   appendToLog("Reading speed from CAN bus...");
-  int packetSize = CAN.parsePacket();
   speedSet = false; // Reset speedSet flag for reading speed
 
-  if (packetSize) {
-    if (CAN.packetExtended()) {
-      Serial.print("Extended ID: 0x");
-      Serial.print(CAN.packetId(), HEX);
-      appendToLog("Extended ID: 0x" + String(CAN.packetId(), HEX));
-    } else {
-      Serial.print("Standard ID: 0x");
-      Serial.print(CAN.packetId(), HEX);
-      appendToLog("Standard ID: 0x" + String(CAN.packetId(), HEX));
+  int packetSize = CAN.parsePacket();
+  if (!packetSize) {
+    appendToLog("No CAN packet received");
+    if (testmode) {
+      speed = random(2500, 3700); // 25-37 km/h
+      wheelSize = random(20, 25); // 20-25 inch wheels
+      wheelPerimeter = random(1800, 2200); // Typical wheel perimeters
+      appendToLog("Test mode: Using simulated values");
     }
-
-    Serial.print(" DLC: ");
-    Serial.print(packetSize);
-    appendToLog("DLC: " + String(packetSize));
-
-    while (CAN.available()) {
-      Serial.print(" ");
-      Serial.print(CAN.read(), HEX);
-      appendToLog(" " + String(CAN.read(), HEX));
-    }
-    Serial.println();
-
-    // Print human-readable data if packetid ends with 0x3203
-    if (packetSize >= 6 && (CAN.packetId() & 0xFFFF) == 0x3203) {
-      CAN.beginPacket(canId);
-      int speedHigh = CAN.read();
-      int speedLow = CAN.read();
-      speed = (speedHigh << 8) | speedLow;
-      Serial.print("Speed Limit: ");
-      Serial.print(speed / 100.0);
-      Serial.println(" km/h");
-      appendToLog("Speed Limit on bike: " + String(speed / 100.0) + " km/h");
-
-      int wheelSizeLow = CAN.read();
-      int wheelSizeHigh = CAN.read();
-      wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
-      Serial.print("Wheel Size: ");
-      Serial.print(wheelSize * 10);
-      Serial.println(" mm");
-      appendToLog("Wheel Size: " + String(wheelSize * 10) + " mm");
-
-      int wheelPerimeterLow = CAN.read();
-      int wheelPerimeterHigh = CAN.read();
-      wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
-      Serial.print("Wheel Perimeter: ");
-      Serial.print(wheelPerimeter);
-      Serial.println(" mm");
-      appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
-    }
+    server.send(200, "text/html", SendHTML(LED1status, LED2status));
+    return;
   }
+
+  // Log full CAN message in the exact format
+  String messageInfo = String(CAN.packetId(), HEX);
+  messageInfo += " " + String(packetSize);
   
-  if(testmode){
-    speed = random(2500, 3700); // Simulate speed for testing
-    wheelSize = random(0, 100); // Simulate wheel size for testing
-    wheelPerimeter = random(0, 100); // Simulate wheel perimeter for testing
+  // Store CAN data in buffer (6 bytes: 2 for speed, 2 for wheel size, 2 for perimeter)
+  uint8_t data[6];
+  for (int i = 0; i < 6 && CAN.available(); i++) {
+    data[i] = CAN.read();
+    messageInfo += " " + String(data[i], HEX);
   }
-  // Send the current speed back to the client
+  appendToLog(messageInfo);
+
+  // Process speed-related packet (ID ends with 0x3203)
+  if (packetSize >= 6 && (CAN.packetId() & 0xFFFF) == 0x3203) {
+    // Extract speed (bytes 0-1)
+    int speedHigh = data[0];  // C4
+    int speedLow = data[1];   // 09
+    speed = (speedHigh << 8) | speedLow;
+    appendToLog("Speed Limit on bike: " + String(speed / 100.0) + " km/h");
+
+    // Extract wheel size (bytes 2-3)
+    int wheelSizeLow = data[2];   // C0
+    int wheelSizeHigh = data[3];  // 2B
+    wheelSize = ((wheelSizeHigh & 0x0F) << 4) | (wheelSizeLow & 0x0F);
+    appendToLog("Wheel Size: " + String(wheelSize * 10) + " mm");
+    appendToLog("Wheel Size (Hex): 0x" + String(wheelSize, HEX));
+
+    // Extract wheel perimeter (bytes 4-5)
+    int wheelPerimeterLow = data[4];   // CE
+    int wheelPerimeterHigh = data[5];  // 08
+    wheelPerimeter = (wheelPerimeterHigh << 8) | wheelPerimeterLow;
+    appendToLog("Wheel Perimeter: " + String(wheelPerimeter) + " mm");
+    appendToLog("Wheel Perimeter (Hex): 0x" + String(wheelPerimeter, HEX));
+  } else {
+    appendToLog("Received non-speed packet or invalid packet size");
+  }
+
   server.send(200, "text/html", SendHTML(LED1status, LED2status));
 }
 
