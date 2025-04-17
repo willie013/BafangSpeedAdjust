@@ -278,6 +278,20 @@ void writeToCan(int speedLimit, int wheelSize, int wheelPerimeter) {
   CAN.write(wheelPerimeter & 0xFF);   // Wheel perimeter low byte
   CAN.write((wheelPerimeter >> 8) & 0xFF); // Wheel perimeter high byte
   CAN.endPacket();
+
+  // Log the complete CAN message in standard format: ID DLC DATA_BYTES
+  String canMessage = String(canId, HEX) + " " + 
+                     String(6) + " " + // DLC (Data Length Code) is 6 bytes
+                     String((speed >> 8) & 0xFF, HEX) + " " + 
+                     String(speed & 0xFF, HEX) + " " +
+                     String(temp_wheel_size, HEX) + " " + 
+                     String((wheelSize >> 8) & 0xFF, HEX) + " " +
+                     String(wheelPerimeter & 0xFF, HEX) + " " + 
+                     String((wheelPerimeter >> 8) & 0xFF, HEX);
+  
+  // Ensure all hex values are uppercase and padded to 2 digits
+  canMessage.toUpperCase();
+  appendToLog("CAN Message sent: " + canMessage);
 }
 
 void printRepeatedMessage(const char* message, int count) {
@@ -290,63 +304,92 @@ void printRepeatedMessage(const char* message, int count) {
 String SendHTML(uint8_t led1stat, uint8_t led2stat) {
   String ptr = "<!DOCTYPE html> <html>\n";
   ptr +="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
-  ptr +="<title>Speed Control</title>\n";
-  ptr +="<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}\n";
-  ptr +="body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;} h3 {color: #444444;margin-bottom: 50px;}\n";
-  ptr +=".button {display: inline-block;width: 200px;background-color: #3498db;border: none;color: white;padding: 15px 0;text-decoration: none;font-size: 20px;margin: 10px auto;cursor: pointer;border-radius: 4px;}\n";
-  ptr +=".button-on {background-color: #3498db;}\n";
-  ptr +=".button-on:active {background-color: #2980b9;}\n";
-  ptr +=".button-off {background-color: #34495e;}\n";
-  ptr +=".button-off:active {background-color: #2c3e50;}\n";
-  ptr +="p {font-size: 14px;color: #888;margin-bottom: 10px;}\n";
-  ptr +="#log {text-align: left; margin: 20px auto; width: 90%; height: 200px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9;}\n";
+  ptr +="<title>Veloretti Speed Control</title>\n";
+  ptr +="<style>\n";
+  ptr +="html { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: inline-block; margin: 0px auto; text-align: center;}\n";
+  ptr +="body { margin-top: 20px; background-color: #f5f5f5; }\n";
+  ptr +="h1 { color: #2c3e50; margin: 20px auto 30px; font-size: 2em; }\n";
+  ptr +="h3 { color: #34495e; margin-bottom: 20px; }\n";
+  ptr +=".container { max-width: 800px; margin: 0 auto; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }\n";
+  ptr +=".status-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0; }\n";
+  ptr +=".status-item { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #dee2e6; }\n";
+  ptr +=".status-label { color: #6c757d; font-size: 0.9em; margin-bottom: 5px; }\n";
+  ptr +=".status-value { color: #2c3e50; font-size: 1.2em; font-weight: bold; }\n";
+  ptr +=".button { display: inline-block; width: 200px; background-color: #3498db; border: none; color: white; padding: 12px 0; text-decoration: none; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 6px; transition: background-color 0.3s; }\n";
+  ptr +=".button:hover { background-color: #2980b9; }\n";
+  ptr +=".button:active { background-color: #2472a4; }\n";
+  ptr +=".button-off { background-color: #95a5a6; }\n";
+  ptr +=".button-off:hover { background-color: #7f8c8d; }\n";
+  ptr +=".control-panel { margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; }\n";
+  ptr +="select { padding: 8px; margin: 10px; border-radius: 4px; border: 1px solid #ddd; font-size: 16px; }\n";
+  ptr +="#log { text-align: left; margin: 20px auto; width: 100%; height: 200px; overflow-y: auto; border: 1px solid #dee2e6; padding: 10px; background-color: #f8f9fa; border-radius: 6px; font-family: monospace; font-size: 14px; }\n";
+  ptr +=".log-entry { margin: 5px 0; padding: 5px; border-bottom: 1px solid #eee; }\n";
+  ptr +=".error { color: #e74c3c; }\n";
+  ptr +=".success { color: #27ae60; }\n";
+  ptr +=".warning { color: #f39c12; }\n";
   ptr +="</style>\n";
   ptr +="<script>\n";
   ptr +="function fetchLog() {\n";
   ptr +="  fetch('/log').then(response => response.text()).then(data => {\n";
-  ptr +="    document.getElementById('log').innerText = data;\n";
+  ptr +="    const logDiv = document.getElementById('log');\n";
+  ptr +="    logDiv.innerHTML = data.split('\\n').map(line => `<div class='log-entry'>${line}</div>`).join('');\n";
+  ptr +="    logDiv.scrollTop = logDiv.scrollHeight;\n";
   ptr +="  });\n";
   ptr +="}\n";
-  ptr +="setInterval(fetchLog, 1000);\n"; // Refresh log every second
+  ptr +="setInterval(fetchLog, 1000);\n";
   ptr +="</script>\n";
   ptr +="</head>\n";
   ptr +="<body>\n";
-  ptr +="<h1>Veloretti Speed Settings</h1>\n";
+  ptr +="<div class='container'>\n";
+  ptr +="<h1>Veloretti Speed Control</h1>\n";
 
-  // Add current speed, wheel size, and wheel perimeter display and read button
-  ptr +="<p>Current Speed: <span id=\"speed\">" + String(speed / 100.0) + " km/h</span></p>\n";
-  ptr +="<p>Wheel Size: <span id=\"wheelSize\">" + String(wheelSize * 10) + " mm</span></p>\n";
-  ptr +="<p>Wheel Perimeter: <span id=\"wheelPerimeter\">" + String(wheelPerimeter) + " mm</span></p>\n";
-  ptr +="<form action=\"/readSpeed\" method=\"GET\">\n";
-  ptr +="<input type=\"submit\" value=\"Read from bike\" class=\"button\">\n";
+  // Status Panel
+  ptr +="<div class='status-panel'>\n";
+  ptr +="<div class='status-item'>\n";
+  ptr +="<div class='status-label'>Current Speed</div>\n";
+  ptr +="<div class='status-value'>" + String(speed / 100.0) + " km/h</div>\n";
+  ptr +="</div>\n";
+  ptr +="<div class='status-item'>\n";
+  ptr +="<div class='status-label'>Wheel Size</div>\n";
+  ptr +="<div class='status-value'>" + String(wheelSize * 10) + " mm</div>\n";
+  ptr +="</div>\n";
+  ptr +="<div class='status-item'>\n";
+  ptr +="<div class='status-label'>Wheel Perimeter</div>\n";
+  ptr +="<div class='status-value'>" + String(wheelPerimeter) + " mm</div>\n";
+  ptr +="</div>\n";
+  ptr +="</div>\n";
+
+  // Control Panel
+  ptr +="<div class='control-panel'>\n";
+  ptr +="<form action='/readSpeed' method='GET'>\n";
+  ptr +="<input type='submit' value='Read from Bike' class='button'>\n";
   ptr +="</form>\n";
-  ptr +="<br><br>\n";
-
-  ptr +="<form action=\"/setSpeed\" method=\"GET\">\n";
-  ptr +="<label for=\"speed\">Select Speed:</label>\n";
-  ptr +="<select id=\"speed\" name=\"speed\">\n";
+  ptr +="<br>\n";
+  ptr +="<form action='/setSpeed' method='GET'>\n";
+  ptr +="<label for='speed'>Select Speed:</label>\n";
+  ptr +="<select id='speed' name='speed'>\n";
   for (int i = 25; i <= 37; i++) {
-    ptr += "  <option value=\"" + String(i) + "\">" + String(i) + " km/h</option>\n";
+    ptr += "  <option value='" + String(i) + "'>" + String(i) + " km/h</option>\n";
   }
   ptr +="</select>\n";
-  ptr +="<br><br>\n";
-  ptr +="<input type=\"submit\" value=\"Write to bike\" class=\"button\">\n";
+  ptr +="<br>\n";
+  ptr +="<input type='submit' value='Write to Bike' class='button'>\n";
   ptr +="</form>\n";
-
-  // Add toggle for log-only mode as a checkbox
-  ptr +="<form action=\"/toggleLogMode\" method=\"GET\">\n";
-  ptr +="<label for=\"logMode\">Log-Only Mode:</label>\n";
-  ptr +="<input type=\"checkbox\" id=\"logMode\" name=\"logMode\" onchange=\"this.form.submit()\"";
+  ptr +="<br>\n";
+  ptr +="<form action='/toggleLogMode' method='GET'>\n";
+  ptr +="<label for='logMode'>Log-Only Mode:</label>\n";
+  ptr +="<input type='checkbox' id='logMode' name='logMode' onchange='this.form.submit()'";
   if (logOnlyMode) {
     ptr +=" checked";
   }
   ptr +=">\n";
   ptr +="</form>\n";
+  ptr +="</div>\n";
 
-  // Add log display
+  // Log Display
   ptr +="<h3>Log Output</h3>\n";
-  ptr +="<div id=\"log\">Loading...</div>\n";
-
+  ptr +="<div id='log'>Loading...</div>\n";
+  ptr +="</div>\n"; // Close container
   ptr +="</body>\n";
   ptr +="</html>\n";
   return ptr;
