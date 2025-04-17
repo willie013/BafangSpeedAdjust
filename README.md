@@ -51,6 +51,20 @@ NB: When you power down the bike, on next restart the led will light up, in spit
 
 ![Speed table](speedchart.jpg)
 
-## Wiring
+## Wiring for arduino nano
 
 ![Wiring](wiring.png)
+
+## ESP32 to MCP2515 Wiring (SPI)
+
+| MCP2515 Pin | ESP32 Pin | Description |
+|-------------|-----------|-------------|
+| VCC | 5V | Power supply |
+| GND | GND | Ground |
+| CS (Chip Select) | GPIO5 | SPI Chip Select (configurable) |
+| SO (MISO) | GPIO19 | SPI MISO |
+| SI (MOSI) | GPIO23 | SPI MOSI |
+| SCK | GPIO18 | SPI Clock |
+| INT | GPIO4 | Interrupt pin (configurable) |
+
+Connect the 5V and ground from the HIGO connector the esp32. and connect the CANH and CANL to the MCP2515 ports.
